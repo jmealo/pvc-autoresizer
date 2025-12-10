@@ -35,6 +35,7 @@ helm upgrade --create-namespace --namespace pvc-autoresizer -i pvc-autoresizer -
 | controller.affinity | object | `{}` | Affinity for controller deployment. |
 | controller.annotations | object | `{}` | Annotations to be added to controller deployment. |
 | controller.args.additionalArgs | list | `[]` | Specify additional args. |
+| controller.args.allowedTargetKinds | list | `[]` | List of target Kinds to allow resizing. Each entry should be a dictionary with `kind`, `group`, and `resource` (plural). If `group` is empty, it implies core group. Only `kind` is passed to the binary flag. `group` and `resource` are used for RBAC generation. Example: allowedTargetKinds:   - kind: Deployment     group: apps     resource: deployments |
 | controller.args.interval | string | `"10s"` | Specify interval to monitor pvc capacity. Used as "--interval" option |
 | controller.args.namespaces | list | `[]` | Specify namespaces to control the pvcs of. Empty for all namespaces. Used as "--namespaces" option |
 | controller.args.prometheusURL | string | `"http://prometheus-prometheus-oper-prometheus.prometheus.svc:9090"` | Specify Prometheus URL to query volume stats. Used as "--prometheus-url" option |

@@ -263,7 +263,7 @@ func (w *pvcAutoresizer) resize(ctx context.Context, pvc *corev1.PersistentVolum
 	return nil
 }
 
-func resolveTargetNamespace(pvc *corev1.PersistentVolumeClaim, annotations map[string]string) string {
+func resolveTargetNamespace(pvc *corev1.PersistentVolumeClaim) string {
 	// Restrict to same namespace for security
 	return pvc.Namespace
 }
@@ -283,7 +283,7 @@ func (w *pvcAutoresizer) resizeTargetResource(ctx context.Context, pvc *corev1.P
 	kind := annotations[pvcautoresizer.ResizeTargetResourceKindAnnotation]
 	name := annotations[pvcautoresizer.ResizeTargetResourceNameAnnotation]
 	jsonPath := annotations[pvcautoresizer.ResizeTargetResourceJSONPathAnnotation]
-	namespace := resolveTargetNamespace(pvc, annotations)
+	namespace := resolveTargetNamespace(pvc)
 
 	if apiVersion == "" || kind == "" || name == "" || jsonPath == "" {
 		return fmt.Errorf("missing required target resource annotations")
