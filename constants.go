@@ -30,7 +30,7 @@ const TargetResourceKindAnnotation = "resize.topolvm.io/target-resource-kind"
 // TargetResourceNameAnnotation is the name of the target Custom Resource to patch.
 const TargetResourceNameAnnotation = "resize.topolvm.io/target-resource-name"
 
-// TargetResourceNamespaceAnnotation is the namespace of the target Custom Resource to patch (optional, defaults to PVC namespace).
+// TargetResourceNamespaceAnnotation is the namespace of the target Custom Resource (defaults to PVC namespace).
 const TargetResourceNamespaceAnnotation = "resize.topolvm.io/target-resource-namespace"
 
 // TargetResourceJSONPathAnnotation is the JSON path to the storage field in the target Custom Resource.

@@ -7,12 +7,12 @@ import (
 
 // Metrics subsystem and all of the keys used by the resizer.
 const (
-	ResizerSuccessResizeTotalKey   = "success_resize_total"
-	ResizerFailedResizeTotalKey    = "failed_resize_total"
-	ResizerLoopSecondsTotalKey     = "loop_seconds_total"
-	ResizerLimitReachedTotalKey    = "limit_reached_total"
-	ResizerCRPatchSuccessTotalKey  = "cr_patch_success_total"
-	ResizerCRPatchFailedTotalKey   = "cr_patch_failed_total"
+	ResizerSuccessResizeTotalKey  = "success_resize_total"
+	ResizerFailedResizeTotalKey   = "failed_resize_total"
+	ResizerLoopSecondsTotalKey    = "loop_seconds_total"
+	ResizerLimitReachedTotalKey   = "limit_reached_total"
+	ResizerCRPatchSuccessTotalKey = "cr_patch_success_total"
+	ResizerCRPatchFailedTotalKey  = "cr_patch_failed_total"
 )
 
 func init() {
