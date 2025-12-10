@@ -43,6 +43,9 @@ spec:
           {{- if .Values.controller.args.namespaces }}
             - --namespaces={{ join "," .Values.controller.args.namespaces }}
           {{- end }}
+          {{- if .Values.controller.args.allowedTargetKinds }}
+            - --allowed-target-kinds={{ range $i, $e := .Values.controller.args.allowedTargetKinds }}{{ if $i }},{{ end }}{{ $e.kind }}{{ end }}
+          {{- end }}
           {{- with .Values.controller.args.additionalArgs -}}
             {{ toYaml . | nindent 12 }}
           {{- end }}

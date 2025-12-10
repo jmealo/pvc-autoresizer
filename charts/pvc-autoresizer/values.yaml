@@ -30,6 +30,17 @@ controller:
     # Used as "--interval" option
     interval: 10s
 
+    # controller.args.allowedTargetKinds -- List of target Kinds to allow resizing.
+    # Each entry should be a dictionary with `kind`, `group`, and `resource` (plural).
+    # If `group` is empty, it implies core group.
+    # Only `kind` is passed to the binary flag. `group` and `resource` are used for RBAC generation.
+    # Example:
+    # allowedTargetKinds:
+    #   - kind: Deployment
+    #     group: apps
+    #     resource: deployments
+    allowedTargetKinds: []
+
     # controller.args.additionalArgs -- Specify additional args.
     additionalArgs: []
 

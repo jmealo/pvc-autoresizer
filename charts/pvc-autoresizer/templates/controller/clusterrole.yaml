@@ -58,3 +58,12 @@ rules:
   - list
   - watch
 {{- end }}
+{{- range .Values.controller.args.allowedTargetKinds }}
+- apiGroups:
+  - {{ default "" .group | quote }}
+  resources:
+  - {{ .resource }}
+  verbs:
+  - get
+  - patch
+{{- end }}
