@@ -58,3 +58,47 @@ rules:
   - list
   - watch
 {{- end }}
+# Uncomment and customize the following rules for operator-aware resizing support.
+# For detailed information, see docs/operator-aware-resizing.md
+#
+# RabbitMQ Operator:
+# - apiGroups:
+#   - rabbitmq.com
+#   resources:
+#   - rabbitmqclusters
+#   verbs:
+#   - get
+#   - list
+#   - patch
+#
+# CloudNativePG (CNPG):
+# - apiGroups:
+#   - postgresql.cnpg.io
+#   resources:
+#   - clusters
+#   verbs:
+#   - get
+#   - list
+#   - patch
+#
+# DragonflyDB:
+# - apiGroups:
+#   - dragonflydb.io
+#   resources:
+#   - dragonflies
+#   verbs:
+#   - get
+#   - list
+#   - patch
+#
+# Strimzi Kafka:
+# - apiGroups:
+#   - kafka.strimzi.io
+#   resources:
+#   - kafkas
+#   verbs:
+#   - get
+#   - list
+#   - patch
+#
+# For other operators, add similar rules with the appropriate apiGroup and resource type.

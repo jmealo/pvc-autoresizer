@@ -135,6 +135,45 @@ spec:
   <snip>
 ```
 
+#### Operator-Aware Resizing
+
+`pvc-autoresizer` can patch Custom Resources instead of directly modifying PVCs. This is useful when PVCs are managed by Kubernetes operators (RabbitMQ, CloudNativePG, DragonflyDB, etc.) that treat direct PVC modifications as configuration drift.
+
+When CR target annotations are present on a PVC, `pvc-autoresizer` will patch the specified field in the Custom Resource, allowing the operator to reconcile the PVC size according to its own logic.
+
+**Example for RabbitMQ Operator:**
+
+```yaml
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: data-rabbitmq-0
+  namespace: rabbitmq
+  annotations:
+    # Standard autoresizer annotations
+    resize.topolvm.io/storage_limit: "100Gi"
+    resize.topolvm.io/threshold: "20%"
+    resize.topolvm.io/increase: "10Gi"
+
+    # Operator-aware resizing annotations
+    resize.topolvm.io/target-resource-api-version: "rabbitmq.com/v1beta1"
+    resize.topolvm.io/target-resource-kind: "RabbitmqCluster"
+    resize.topolvm.io/target-resource-name: "my-rabbitmq"
+    resize.topolvm.io/target-resource-json-path: ".spec.persistence.storage"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: topolvm-provisioner
+```
+
+**RBAC Requirements**: You must grant `pvc-autoresizer` permissions to patch the target Custom Resources. See the [Operator-Aware Resizing documentation](docs/operator-aware-resizing.md) for RBAC configuration examples.
+
+**For detailed information**, including examples for other operators, RBAC setup, troubleshooting, and monitoring, see:
+- [docs/operator-aware-resizing.md](docs/operator-aware-resizing.md)
+
 #### Initial resize
 
 PVC request size can also be changed at the creation time based on the largest PVC size in the same group. PVCs are grouped by labels, and the label key for grouping is specified by `resize.topolvm.io/initial-resize-group-by` annotation.
