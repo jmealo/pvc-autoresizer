@@ -241,6 +241,14 @@ the PVC is resized up to this limit.
 
 `pvcautoresizer_limit_reached_total` is a counter that indicates how many storage limit was reached.
 
+#### `pvcautoresizer_cr_patch_total`
+
+`pvcautoresizer_cr_patch_total` is a counter that indicates how many Custom Resource patch attempts (success/failure) were made. It includes `namespace`, `cr_kind`, and `status` labels.
+
+#### `pvcautoresizer_cr_patch_errors_total`
+
+`pvcautoresizer_cr_patch_errors_total` is a counter that indicates the types of errors encountered during Custom Resource patching. It includes `namespace`, `cr_kind`, and `error_type` labels (e.g., `InvalidJSONPath`, `DisallowedKind`).
+
 ## Contributing
 
 pvc-autoresizer project welcomes contributions from any member of our community. To get

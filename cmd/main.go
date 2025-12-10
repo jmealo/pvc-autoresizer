@@ -63,7 +63,8 @@ func init() {
 	fs.BoolVar(&config.pvcMutatingWebhookEnabled, "pvc-mutating-webhook-enabled", true,
 		"Enable the pvc mutating webhook endpoint")
 	fs.StringSliceVar(&config.allowedTargetKinds, "allowed-target-kinds", []string{},
-		"Comma-separated list of allowed Kind names for target resource resizing (e.g. 'ConfigMap,Deployment'). If empty, no target resizing is allowed.")
+		"Comma-separated list of allowed Kind names for target resource resizing (e.g. 'ConfigMap,Deployment'). "+
+			"If empty, no target resizing is allowed.")
 
 	goflags := flag.NewFlagSet("zap", flag.ExitOnError)
 	config.zapOpts.BindFlags(goflags)
