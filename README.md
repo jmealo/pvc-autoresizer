@@ -141,6 +141,23 @@ spec:
 
 When CR target annotations are present on a PVC, `pvc-autoresizer` will patch the specified field in the Custom Resource, allowing the operator to reconcile the PVC size according to its own logic.
 
+**🔒 Security Requirements:**
+
+This feature implements defense-in-depth security and requires:
+1. **RBAC**: Explicit permissions for each CR type (no wildcard RBAC)
+2. **Path Validation**: JSON paths must target `/spec/*` only (enforced by code)
+3. **Configuration**: Feature disabled by default in Helm values
+
+**Helm configuration (values.yaml):**
+```yaml
+operatorAwareResizing:
+  enabled: true
+  allowedResources:
+    - apiGroup: "rabbitmq.com"
+      kind: "RabbitmqCluster"
+      resource: "rabbitmqclusters"
+```
+
 **Example for RabbitMQ Operator:**
 
 ```yaml
@@ -169,9 +186,7 @@ spec:
   storageClassName: topolvm-provisioner
 ```
 
-**RBAC Requirements**: You must grant `pvc-autoresizer` permissions to patch the target Custom Resources. See the [Operator-Aware Resizing documentation](docs/operator-aware-resizing.md) for RBAC configuration examples.
-
-**For detailed information**, including examples for other operators, RBAC setup, troubleshooting, and monitoring, see:
+**For detailed information**, including security model, RBAC setup, troubleshooting, and monitoring, see:
 - [docs/operator-aware-resizing.md](docs/operator-aware-resizing.md)
 
 #### Initial resize

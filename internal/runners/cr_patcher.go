@@ -15,11 +15,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// +kubebuilder:rbac:groups="*",resources="*",verbs=get;list;patch
-//
-// NOTE: The above RBAC is intentionally broad and should be restricted in production.
-// Administrators must manually configure specific RBAC rules for the Custom Resources
-// being patched. See docs/operator-aware-resizing.md for examples.
+// RBAC for operator-aware resizing is configured via Helm values (values.yaml).
+// When operatorAwareResizing.enabled is true, RBAC rules are automatically generated
+// for the CR types listed in operatorAwareResizing.allowedResources.
+// See docs/operator-aware-resizing.md for configuration details.
 
 // CRTargetConfig holds the parsed Custom Resource target configuration
 // extracted from PVC annotations.
@@ -85,6 +84,11 @@ func parseCRTargetAnnotations(pvc *corev1.PersistentVolumeClaim) (*CRTargetConfi
 	// Normalize JSON path to JSON Pointer format
 	normalizedPath := normalizeJSONPath(jsonPath)
 
+	// Validate path security - only allow /spec/* paths
+	if err := validateJSONPath(jsonPath); err != nil {
+		return nil, err
+	}
+
 	return &CRTargetConfig{
 		APIVersion: apiVersion,
 		Kind:       kind,
@@ -111,6 +115,30 @@ func normalizeJSONPath(path string) string {
 	// Convert dot notation to JSON Pointer format
 	// Replace dots with slashes and add leading slash
 	return "/" + strings.ReplaceAll(path, ".", "/")
+}
+
+// validateJSONPath ensures the JSON path only targets /spec/* fields.
+// This prevents privilege escalation by blocking patches to:
+// - /metadata (labels, annotations, ownerRefs, etc.)
+// - /status (operator state)
+// - Other sensitive fields
+func validateJSONPath(path string) error {
+	// Normalize to JSON Pointer format first
+	normalized := normalizeJSONPath(path)
+
+	// Must start with /spec/
+	if !strings.HasPrefix(normalized, "/spec/") {
+		return fmt.Errorf("invalid JSON path %q: for security reasons, only paths starting with /spec/ are allowed (got %q)",
+			path, normalized)
+	}
+
+	// Additional validation: ensure it's not just "/spec" (must target a field under spec)
+	if normalized == "/spec" || normalized == "/spec/" {
+		return fmt.Errorf("invalid JSON path %q: must target a specific field under /spec (e.g., /spec/storage/size)",
+			path)
+	}
+
+	return nil
 }
 
 // patchCRField patches the target Custom Resource field with the new storage size.

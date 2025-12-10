@@ -17,6 +17,65 @@ When pvc-autoresizer directly patches a PVC managed by an operator:
 
 pvc-autoresizer can patch a field in the operator's Custom Resource instead of the PVC directly. The operator then reconciles the PVC size based on its own logic, maintaining the desired workflow.
 
+## Security Model
+
+Operator-aware resizing implements **defense-in-depth** security with two independent layers:
+
+### Layer 1: RBAC (Helm-Generated)
+
+The pvc-autoresizer controller must be granted explicit RBAC permissions to patch each Custom Resource type. RBAC rules are automatically generated from your Helm values.
+
+**Configuration in values.yaml:**
+```yaml
+operatorAwareResizing:
+  enabled: true
+  allowedResources:
+    - apiGroup: "rabbitmq.com"
+      kind: "RabbitmqCluster"
+      resource: "rabbitmqclusters"
+```
+
+**Helm automatically generates:**
+```yaml
+- apiGroups: ["rabbitmq.com"]
+  resources: ["rabbitmqclusters"]
+  verbs: ["get", "list", "patch"]
+```
+
+### Layer 2: JSONPath Validation (Code Enforced)
+
+For additional security, the controller enforces that JSON paths can only target fields under `/spec/`. Paths targeting `/metadata`, `/status`, or other sensitive fields are rejected with a clear error message.
+
+**Valid paths:**
+- `.spec.storage.size` ✅
+- `/spec/persistence/storage` ✅
+- `.spec.resources.requests.storage` ✅
+
+**Invalid paths (rejected):**
+- `.metadata.annotations.foo` ❌
+- `/status/conditions` ❌
+- `.metadata.labels.app` ❌
+
+### Why Two Layers Are Sufficient
+
+This approach is **simpler and more secure** than having a separate ConfigMap allowlist:
+
+1. **Single source of truth**: values.yaml controls both RBAC and configuration
+2. **No configuration drift**: RBAC always matches what you configured
+3. **Standard pattern**: Helm-generated RBAC is a common Kubernetes practice
+4. **Defense-in-depth**: RBAC controls CR access, JSONPath prevents field tampering
+
+### Prerequisites
+
+Before using operator-aware resizing, you must:
+
+1. ✅ Enable the feature in values.yaml: `operatorAwareResizing.enabled: true`
+2. ✅ List allowed CR types with correct resource names in `allowedResources`
+3. ✅ Run `helm upgrade` to apply the configuration
+4. ✅ Ensure PVC annotations use valid JSON paths targeting `/spec/*` only
+
+**If the feature is disabled or no resources are listed, operator-aware resizing is completely disabled for security.**
+
 ## How It Works
 
 ```
@@ -187,85 +246,93 @@ spec:
 
 ## RBAC Configuration
 
-### Overview
+### Helm Chart (Recommended)
 
-pvc-autoresizer needs permissions to `get`, `list`, and `patch` the target Custom Resources. Since these resources are not known at compile time, you must manually configure RBAC rules.
+When deploying via Helm, RBAC rules are automatically generated from your values.yaml configuration. This is the **recommended approach** as it ensures your RBAC always matches your intended configuration.
 
-### Security Consideration
-
-The default generated RBAC includes a **broad wildcard rule** that grants access to all Custom Resources:
+**Step 1: Configure values.yaml**
 
 ```yaml
-- apiGroups: ["*"]
-  resources: ["*"]
-  verbs: ["get", "list", "patch"]
+operatorAwareResizing:
+  enabled: true
+  allowedResources:
+    # RabbitMQ Operator
+    - apiGroup: "rabbitmq.com"
+      kind: "RabbitmqCluster"
+      resource: "rabbitmqclusters"
+
+    # CloudNativePG
+    - apiGroup: "postgresql.cnpg.io"
+      kind: "Cluster"
+      resource: "clusters"
+
+    # DragonflyDB
+    - apiGroup: "dragonflydb.io"
+      kind: "Dragonfly"
+      resource: "dragonflies"
 ```
 
-**This is intentionally permissive and should be restricted in production environments.**
+**Step 2: Deploy or upgrade**
 
-### Restricting RBAC (Recommended)
+```bash
+helm upgrade --install pvc-autoresizer pvc-autoresizer/pvc-autoresizer \
+  -n pvc-autoresizer \
+  -f values.yaml
+```
 
-Create specific RBAC rules for only the Custom Resources you need to patch:
+**Step 3: Verify RBAC was generated**
 
-#### RabbitMQ Operator
+```bash
+kubectl get clusterrole pvc-autoresizer-controller -o yaml
+```
+
+You should see RBAC rules for each resource you configured.
+
+### Manual RBAC (Non-Helm Deployments)
+
+If not using Helm, you must manually create RBAC rules for each Custom Resource type:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: pvc-autoresizer-rabbitmq
+  name: pvc-autoresizer-operator-aware
 rules:
+# RabbitMQ Operator
 - apiGroups: ["rabbitmq.com"]
   resources: ["rabbitmqclusters"]
   verbs: ["get", "list", "patch"]
-```
 
-#### CloudNativePG
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: pvc-autoresizer-cnpg
-rules:
+# CloudNativePG
 - apiGroups: ["postgresql.cnpg.io"]
   resources: ["clusters"]
   verbs: ["get", "list", "patch"]
-```
 
-#### DragonflyDB
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: pvc-autoresizer-dragonflydb
-rules:
+# DragonflyDB
 - apiGroups: ["dragonflydb.io"]
   resources: ["dragonflies"]
   verbs: ["get", "list", "patch"]
-```
-
-#### Bind to ServiceAccount
-
-```yaml
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: pvc-autoresizer-cr-access
+  name: pvc-autoresizer-operator-aware
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: pvc-autoresizer-rabbitmq  # Or your specific ClusterRole
+  name: pvc-autoresizer-operator-aware
 subjects:
 - kind: ServiceAccount
   name: pvc-autoresizer-controller
-  namespace: topolvm-system  # Adjust to your deployment namespace
+  namespace: pvc-autoresizer  # Adjust to your deployment namespace
 ```
 
-### Using Helm Values
+### Security Best Practices
 
-If using the Helm chart, uncomment and customize the RBAC examples in `charts/pvc-autoresizer/templates/controller/clusterrole.yaml`.
+1. **Feature disabled by default**: `operatorAwareResizing.enabled: false` prevents any CR patching
+2. **Explicit allowlist**: Only CRs in `allowedResources` receive RBAC permissions
+3. **No wildcard RBAC**: The controller has no broad permissions to patch arbitrary resources
+4. **JSONPath validation**: Even with RBAC, only `/spec/*` fields can be modified
 
 ## Monitoring
 
@@ -365,40 +432,75 @@ kubectl get rabbitmqcluster my-rabbitmq -n rabbitmq
 kubectl get pvc data-rabbitmq-0 -n rabbitmq -o yaml | grep target-resource
 ```
 
-### Error: "Insufficient permissions"
+### Error: "Insufficient permissions to patch CR"
 
-**Symptom**: Event shows `insufficient permissions to patch CR` or `Forbidden`
+**Symptom**: Event shows `insufficient permissions to patch CR RabbitmqCluster/...`
 
-**Causes:**
-- Missing RBAC permissions for the target CR
+**Cause**: The CR type is not in values.yaml, so RBAC was not generated for it
 
 **Resolution:**
 
-1. Check current permissions:
-```bash
-kubectl auth can-i patch rabbitmqclusters.rabbitmq.com \
-  --as=system:serviceaccount:topolvm-system:pvc-autoresizer-controller \
-  -n rabbitmq
+1. Add the CR type to your Helm values:
+```yaml
+operatorAwareResizing:
+  enabled: true
+  allowedResources:
+    - apiGroup: "rabbitmq.com"
+      kind: "RabbitmqCluster"
+      resource: "rabbitmqclusters"
 ```
 
-2. Add RBAC rule (see RBAC Configuration section above)
+2. Upgrade the Helm release:
+```bash
+helm upgrade pvc-autoresizer pvc-autoresizer/pvc-autoresizer -n pvc-autoresizer -f values.yaml
+```
 
-3. Verify permissions after adding RBAC:
+3. Verify RBAC was generated:
+```bash
+kubectl get clusterrole pvc-autoresizer-controller -o yaml | grep rabbitmq
+```
+
+4. (Optional) Check permissions directly:
 ```bash
 kubectl auth can-i patch rabbitmqclusters.rabbitmq.com \
-  --as=system:serviceaccount:topolvm-system:pvc-autoresizer-controller \
+  --as=system:serviceaccount:pvc-autoresizer:pvc-autoresizer-controller \
   -n rabbitmq
 # Should output: yes
 ```
 
-### Error: "Invalid JSON path"
+### Error: "Invalid JSON path: for security reasons..."
 
-**Symptom**: Event shows `failed to set field at path` or `Invalid CR target configuration`
+**Symptom**: Event shows `invalid JSON path ".metadata.annotations.foo": for security reasons, only paths starting with /spec/ are allowed`
+
+**Cause**: The JSON path targets a forbidden field (metadata, status, etc.)
+
+**Resolution:**
+
+JSON paths must target fields under `/spec/` only. Update your PVC annotation:
+
+**Invalid paths:**
+- `.metadata.annotations.storage` ❌ (security violation)
+- `.status.capacity` ❌ (security violation)
+- `/spec` ❌ (must target a specific field)
+
+**Valid paths:**
+- `.spec.persistence.storage` ✅
+- `.spec.storage.size` ✅
+- `/spec/resources/requests/storage` ✅
+
+Common paths for popular operators:
+- RabbitMQ: `.spec.persistence.storage`
+- CNPG: `.spec.storage.size`
+- Strimzi Kafka: `.spec.kafka.storage.size`
+
+### Error: "Failed to set field at path"
+
+**Symptom**: Event shows `failed to set field at path "/spec/persistence/storage"`
 
 **Causes:**
 - JSON path doesn't exist in the CR
-- Path syntax is incorrect
 - Field name is misspelled
+- Path structure doesn't match CR schema
 
 **Resolution:**
 
@@ -413,10 +515,7 @@ kubectl get rabbitmqcluster my-rabbitmq -n rabbitmq -o yaml
 kubectl get rabbitmqcluster my-rabbitmq -n rabbitmq -o jsonpath='{.spec.persistence.storage}'
 ```
 
-3. Common paths for popular operators:
-   - RabbitMQ: `.spec.persistence.storage`
-   - CNPG: `.spec.storage.size`
-   - Strimzi Kafka: `.spec.kafka.storage.size`
+3. Compare your path with the CR's actual schema
 
 ### Error: "Conflict while patching CR"
 
@@ -507,13 +606,17 @@ To migrate existing PVCs from direct patching to operator-aware resizing:
 
 2. **Monitor Metrics**: Set up alerts on `pvc_autoresizer_cr_patch_failed_total` to catch configuration issues early
 
-3. **Use Specific RBAC**: Don't use the wildcard RBAC in production; grant only necessary permissions
+3. **Use Helm for RBAC**: Let Helm auto-generate RBAC from values.yaml to prevent configuration drift
 
-4. **Document JSON Paths**: Maintain documentation of JSON paths for each operator you use
+4. **Explicit Resource List**: Only add CR types to `allowedResources` that you actually need to resize
 
-5. **Version Compatibility**: Verify JSON paths when upgrading operators, as CR schemas may change
+5. **Document JSON Paths**: Maintain documentation of JSON paths for each operator you use
 
-6. **Validate Annotations**: Use admission webhooks or policy engines to validate annotation correctness
+6. **Version Compatibility**: Verify JSON paths when upgrading operators, as CR schemas may change
+
+7. **Validate Annotations**: Use admission webhooks or policy engines to validate annotation correctness
+
+8. **Restrict to /spec/***: Never attempt to patch metadata or status fields - the controller enforces this
 
 ## Supported Operators
 

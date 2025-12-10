@@ -235,6 +235,41 @@ func TestNormalizeJSONPath(t *testing.T) {
 	}
 }
 
+func TestValidateJSONPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		// Valid paths - must start with /spec/ and target a specific field
+		{name: "valid spec path", path: ".spec.storage.size", wantErr: false},
+		{name: "valid spec nested", path: "/spec/persistence/storage", wantErr: false},
+		{name: "valid spec deep", path: ".spec.resources.requests.storage", wantErr: false},
+		{name: "valid without leading dot", path: "spec.persistence.storage", wantErr: false},
+		{name: "valid pointer format", path: "/spec/storage/size", wantErr: false},
+
+		// Invalid paths - security violations
+		{name: "metadata blocked", path: ".metadata.annotations.foo", wantErr: true},
+		{name: "status blocked", path: "/status/conditions", wantErr: true},
+		{name: "metadata labels blocked", path: ".metadata.labels.app", wantErr: true},
+		{name: "metadata ownerRefs blocked", path: "/metadata/ownerReferences", wantErr: true},
+		{name: "spec root only", path: "/spec", wantErr: true},
+		{name: "spec root with dot", path: ".spec", wantErr: true},
+		{name: "spec root with trailing slash", path: "/spec/", wantErr: true},
+		{name: "non-spec root", path: "/apiVersion", wantErr: true},
+		{name: "kind field blocked", path: ".kind", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateJSONPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateJSONPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseAPIVersion(t *testing.T) {
 	tests := []struct {
 		name        string
