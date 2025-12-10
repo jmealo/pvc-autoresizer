@@ -33,23 +33,25 @@ const logLevelWarn = 3
 
 // NewPVCAutoresizer returns a new pvcAutoresizer struct
 func NewPVCAutoresizer(mc MetricsClient, c client.Client, log logr.Logger, interval time.Duration,
-	recorder record.EventRecorder) manager.Runnable {
+	recorder record.EventRecorder, allowedTargetKinds []string) manager.Runnable {
 
 	return &pvcAutoresizer{
-		metricsClient: mc,
-		client:        c,
-		log:           log,
-		interval:      interval,
-		recorder:      recorder,
+		metricsClient:      mc,
+		client:             c,
+		log:                log,
+		interval:           interval,
+		recorder:           recorder,
+		allowedTargetKinds: allowedTargetKinds,
 	}
 }
 
 type pvcAutoresizer struct {
-	client        client.Client
-	metricsClient MetricsClient
-	interval      time.Duration
-	log           logr.Logger
-	recorder      record.EventRecorder
+	client             client.Client
+	metricsClient      MetricsClient
+	interval           time.Duration
+	log                logr.Logger
+	recorder           record.EventRecorder
+	allowedTargetKinds []string
 }
 
 // Start implements manager.Runnable
@@ -262,10 +264,17 @@ func (w *pvcAutoresizer) resize(ctx context.Context, pvc *corev1.PersistentVolum
 }
 
 func resolveTargetNamespace(pvc *corev1.PersistentVolumeClaim, annotations map[string]string) string {
-	if ns, ok := annotations[pvcautoresizer.ResizeTargetResourceNamespaceAnnotation]; ok && ns != "" {
-		return ns
-	}
+	// Restrict to same namespace for security
 	return pvc.Namespace
+}
+
+func (w *pvcAutoresizer) isAllowedKind(kind string) bool {
+	for _, k := range w.allowedTargetKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *pvcAutoresizer) resizeTargetResource(ctx context.Context, pvc *corev1.PersistentVolumeClaim, newReq *resource.Quantity) error {
@@ -278,6 +287,29 @@ func (w *pvcAutoresizer) resizeTargetResource(ctx context.Context, pvc *corev1.P
 
 	if apiVersion == "" || kind == "" || name == "" || jsonPath == "" {
 		return fmt.Errorf("missing required target resource annotations")
+	}
+
+	// Security: Validate Kind
+	if !w.isAllowedKind(kind) {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "DisallowedKind")
+		w.recorder.Eventf(pvc, corev1.EventTypeWarning, "ResizeTargetDisallowed", "Target Kind %s is not in the allowlist", kind)
+		return fmt.Errorf("target kind %s is not allowed", kind)
+	}
+
+	// Security: Validate JSONPath
+	// Must start with .spec or .data (for ConfigMaps)
+	// Must not contain metadata or status to prevent escalation/overwriting critical fields
+	trimmedPath := strings.TrimPrefix(jsonPath, ".")
+	if !strings.HasPrefix(trimmedPath, "spec") && !strings.HasPrefix(trimmedPath, "data") {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "InvalidJSONPath")
+		return fmt.Errorf("jsonPath must start with .spec or .data")
+	}
+	if strings.Contains(jsonPath, "metadata") || strings.Contains(jsonPath, "status") {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "UnsafeJSONPath")
+		return fmt.Errorf("jsonPath cannot contain metadata or status")
 	}
 
 	// Parse APIVersion to GroupVersion

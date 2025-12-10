@@ -25,6 +25,7 @@ var config struct {
 	development               bool
 	zapOpts                   zap.Options
 	pvcMutatingWebhookEnabled bool
+	allowedTargetKinds        []string
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -61,6 +62,8 @@ func init() {
 	fs.BoolVar(&config.development, "development", false, "Use development logger config")
 	fs.BoolVar(&config.pvcMutatingWebhookEnabled, "pvc-mutating-webhook-enabled", true,
 		"Enable the pvc mutating webhook endpoint")
+	fs.StringSliceVar(&config.allowedTargetKinds, "allowed-target-kinds", []string{},
+		"Comma-separated list of allowed Kind names for target resource resizing (e.g. 'ConfigMap,Deployment'). If empty, no target resizing is allowed.")
 
 	goflags := flag.NewFlagSet("zap", flag.ExitOnError)
 	config.zapOpts.BindFlags(goflags)
