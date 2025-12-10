@@ -29,3 +29,18 @@ const DefaultInodesThreshold = "10%"
 
 // DefaultIncrease is the default value of ResizeIncreaseAnnotation.
 const DefaultIncrease = "10%"
+
+// ResizeTargetKindAnnotation is the key of target resource kind.
+const ResizeTargetKindAnnotation = "resize.pvc.io/target-kind"
+
+// ResizeTargetGroupAnnotation is the key of target resource group.
+const ResizeTargetGroupAnnotation = "resize.pvc.io/target-group"
+
+// ResizeTargetVersionAnnotation is the key of target resource version.
+const ResizeTargetVersionAnnotation = "resize.pvc.io/target-version"
+
+// ResizeTargetNameAnnotation is the key of target resource name.
+const ResizeTargetNameAnnotation = "resize.pvc.io/target-name"
+
+// ResizeTargetPathAnnotation is the key of target resource path.
+const ResizeTargetPathAnnotation = "resize.pvc.io/target-path"

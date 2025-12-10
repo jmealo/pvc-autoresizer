@@ -14,6 +14,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -224,6 +226,69 @@ func (w *pvcAutoresizer) resize(ctx context.Context, pvc *corev1.PersistentVolum
 		newReq := resource.NewQuantity(newReqBytes, resource.BinarySI)
 		if newReq.Cmp(limitRes) > 0 {
 			newReq = &limitRes
+		}
+
+		if targetKind, ok := pvc.Annotations[pvcautoresizer.ResizeTargetKindAnnotation]; ok {
+			targetGroup := pvc.Annotations[pvcautoresizer.ResizeTargetGroupAnnotation]
+			targetVersion := pvc.Annotations[pvcautoresizer.ResizeTargetVersionAnnotation]
+			targetName := pvc.Annotations[pvcautoresizer.ResizeTargetNameAnnotation]
+			targetPath := pvc.Annotations[pvcautoresizer.ResizeTargetPathAnnotation]
+
+			if targetName == "" || targetPath == "" {
+				log.Info("target-name or target-path annotation is missing for parent patching")
+				return nil
+			}
+
+			gvk := schema.GroupVersionKind{
+				Group:   targetGroup,
+				Version: targetVersion,
+				Kind:    targetKind,
+			}
+
+			parent := &unstructured.Unstructured{}
+			parent.SetGroupVersionKind(gvk)
+			if err := w.client.Get(ctx, client.ObjectKey{Namespace: pvc.Namespace, Name: targetName}, parent); err != nil {
+				log.Error(err, "failed to get target parent resource")
+				return err
+			}
+
+			pathParts := strings.Split(strings.Trim(targetPath, "/"), "/")
+			currentVal, found, err := unstructured.NestedString(parent.Object, pathParts...)
+			if err == nil && found {
+				if currentQty, err := resource.ParseQuantity(currentVal); err == nil {
+					if currentQty.Cmp(*newReq) >= 0 {
+						log.Info("target resource already has requested storage size or larger", "current", currentVal, "requested", newReq.String())
+						pvc.Annotations[pvcautoresizer.PreviousCapacityBytesAnnotation] = strconv.FormatInt(vs.CapacityBytes, 10)
+						return w.client.Update(ctx, pvc)
+					}
+				}
+			}
+
+			original := parent.DeepCopy()
+			if err := unstructured.SetNestedField(parent.Object, newReq.String(), pathParts...); err != nil {
+				log.Error(err, "failed to set new size in parent object")
+				return err
+			}
+
+			if err := w.client.Patch(ctx, parent, client.MergeFrom(original)); err != nil {
+				log.Error(err, "failed to patch parent resource")
+				metrics.KubernetesClientFailTotal.Increment()
+				return err
+			}
+
+			pvc.Annotations[pvcautoresizer.PreviousCapacityBytesAnnotation] = strconv.FormatInt(vs.CapacityBytes, 10)
+			if err := w.client.Update(ctx, pvc); err != nil {
+				metrics.KubernetesClientFailTotal.Increment()
+				return err
+			}
+
+			log.Info("resize started (parent patched)",
+				"parent", targetName,
+				"to", newReq.Value(),
+			)
+			w.recorder.Eventf(pvc, corev1.EventTypeNormal, "Resized", "Parent resource %s patched to %s", targetName, newReq.String())
+			metrics.ResizerSuccessResizeTotal.Increment(pvc.Name, pvc.Namespace)
+			return nil
 		}
 
 		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *newReq
