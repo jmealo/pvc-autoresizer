@@ -14,6 +14,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -226,7 +228,16 @@ func (w *pvcAutoresizer) resize(ctx context.Context, pvc *corev1.PersistentVolum
 			newReq = &limitRes
 		}
 
-		pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *newReq
+		if _, ok := pvc.Annotations[pvcautoresizer.ResizeTargetResourceKindAnnotation]; ok {
+			err = w.resizeTargetResource(ctx, pvc, newReq)
+			if err != nil {
+				log.Error(err, "failed to resize target resource")
+				return err
+			}
+		} else {
+			pvc.Spec.Resources.Requests[corev1.ResourceStorage] = *newReq
+		}
+
 		pvc.Annotations[pvcautoresizer.PreviousCapacityBytesAnnotation] = strconv.FormatInt(vs.CapacityBytes, 10)
 		err = w.client.Update(ctx, pvc)
 		if err != nil {
@@ -241,10 +252,80 @@ func (w *pvcAutoresizer) resize(ctx context.Context, pvc *corev1.PersistentVolum
 			"inodesThreshold", inodesThreshold,
 			"inodesAvailable", vs.AvailableInodeSize,
 		)
-		w.recorder.Eventf(pvc, corev1.EventTypeNormal, "Resized", "PVC volume is resized to %s", newReq.String())
+		if _, ok := pvc.Annotations[pvcautoresizer.ResizeTargetResourceKindAnnotation]; !ok {
+			w.recorder.Eventf(pvc, corev1.EventTypeNormal, "Resized", "PVC volume is resized to %s", newReq.String())
+		}
 		metrics.ResizerSuccessResizeTotal.Increment(pvc.Name, pvc.Namespace)
 	}
 
+	return nil
+}
+
+func resolveTargetNamespace(pvc *corev1.PersistentVolumeClaim, annotations map[string]string) string {
+	if ns, ok := annotations[pvcautoresizer.ResizeTargetResourceNamespaceAnnotation]; ok && ns != "" {
+		return ns
+	}
+	return pvc.Namespace
+}
+
+func (w *pvcAutoresizer) resizeTargetResource(ctx context.Context, pvc *corev1.PersistentVolumeClaim, newReq *resource.Quantity) error {
+	annotations := pvc.Annotations
+	apiVersion := annotations[pvcautoresizer.ResizeTargetResourceAPIVersionAnnotation]
+	kind := annotations[pvcautoresizer.ResizeTargetResourceKindAnnotation]
+	name := annotations[pvcautoresizer.ResizeTargetResourceNameAnnotation]
+	jsonPath := annotations[pvcautoresizer.ResizeTargetResourceJSONPathAnnotation]
+	namespace := resolveTargetNamespace(pvc, annotations)
+
+	if apiVersion == "" || kind == "" || name == "" || jsonPath == "" {
+		return fmt.Errorf("missing required target resource annotations")
+	}
+
+	// Parse APIVersion to GroupVersion
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	if err != nil {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "InvalidAPIVersion")
+		return fmt.Errorf("invalid apiVersion: %w", err)
+	}
+
+	gvk := schema.GroupVersionKind{
+		Group:   gv.Group,
+		Version: gv.Version,
+		Kind:    kind,
+	}
+
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(gvk)
+	key := client.ObjectKey{Namespace: namespace, Name: name}
+
+	if err := w.client.Get(ctx, key, u); err != nil {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "GetFailed")
+		return fmt.Errorf("failed to get target resource: %w", err)
+	}
+
+	// Prepare patch
+	original := u.DeepCopy()
+
+	// Convert jsonPath (e.g., .spec.storage.size) to fields slice
+	fields := strings.Split(strings.TrimPrefix(jsonPath, "."), ".")
+
+	// Set the new size
+	if err := unstructured.SetNestedField(u.Object, newReq.String(), fields...); err != nil {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "SetFieldFailed")
+		return fmt.Errorf("failed to set field in target resource: %w", err)
+	}
+
+	if err := w.client.Patch(ctx, u, client.MergeFrom(original)); err != nil {
+		metrics.CrPatchTotal.Increment(namespace, kind, "failure")
+		metrics.CrPatchErrorsTotal.Increment(namespace, kind, "PatchFailed")
+		w.recorder.Eventf(pvc, corev1.EventTypeWarning, "ResizeTargetPatchFailed", "Failed to patch target resource %s/%s: %v", kind, name, err)
+		return fmt.Errorf("failed to patch target resource: %w", err)
+	}
+
+	metrics.CrPatchTotal.Increment(namespace, kind, "success")
+	w.recorder.Eventf(pvc, corev1.EventTypeNormal, "ResizeTargetPatched", "Target resource %s/%s patched successfully to %s", kind, name, newReq.String())
 	return nil
 }
 

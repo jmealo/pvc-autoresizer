@@ -29,3 +29,18 @@ const DefaultInodesThreshold = "10%"
 
 // DefaultIncrease is the default value of ResizeIncreaseAnnotation.
 const DefaultIncrease = "10%"
+
+// ResizeTargetResourceAPIVersionAnnotation is the key for the target resource API version.
+const ResizeTargetResourceAPIVersionAnnotation = "resize.topolvm.io/target-resource-api-version"
+
+// ResizeTargetResourceKindAnnotation is the key for the target resource kind.
+const ResizeTargetResourceKindAnnotation = "resize.topolvm.io/target-resource-kind"
+
+// ResizeTargetResourceNameAnnotation is the key for the target resource name.
+const ResizeTargetResourceNameAnnotation = "resize.topolvm.io/target-resource-name"
+
+// ResizeTargetResourceNamespaceAnnotation is the key for the target resource namespace.
+const ResizeTargetResourceNamespaceAnnotation = "resize.topolvm.io/target-resource-namespace"
+
+// ResizeTargetResourceJSONPathAnnotation is the key for the target resource JSON path.
+const ResizeTargetResourceJSONPathAnnotation = "resize.topolvm.io/target-resource-json-path"

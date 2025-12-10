@@ -11,6 +11,8 @@ const (
 	ResizerFailedResizeTotalKey  = "failed_resize_total"
 	ResizerLoopSecondsTotalKey   = "loop_seconds_total"
 	ResizerLimitReachedTotalKey  = "limit_reached_total"
+	CrPatchTotalKey              = "cr_patch_total"
+	CrPatchErrorsTotalKey        = "cr_patch_errors_total"
 )
 
 func init() {
@@ -67,6 +69,22 @@ func (a *resizerLimitReachedTotalAdapter) SpecifyLabels(pvcname string, pvcns st
 	a.metric.With(prometheus.Labels{"persistentvolumeclaim": pvcname, "namespace": pvcns}).Add(0)
 }
 
+type crPatchTotalAdapter struct {
+	metric prometheus.CounterVec
+}
+
+func (a *crPatchTotalAdapter) Increment(namespace, crKind, status string) {
+	a.metric.With(prometheus.Labels{"namespace": namespace, "cr_kind": crKind, "status": status}).Inc()
+}
+
+type crPatchErrorsTotalAdapter struct {
+	metric prometheus.CounterVec
+}
+
+func (a *crPatchErrorsTotalAdapter) Increment(namespace, crKind, errorType string) {
+	a.metric.With(prometheus.Labels{"namespace": namespace, "cr_kind": crKind, "error_type": errorType}).Inc()
+}
+
 var (
 	resizerSuccessResizeTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: MetricsNamespace,
@@ -92,6 +110,18 @@ var (
 		Help:      "counter that indicates how many storage limits were reached.",
 	}, []string{"persistentvolumeclaim", "namespace"})
 
+	crPatchTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      CrPatchTotalKey,
+		Help:      "counter of CR patches (success/failure).",
+	}, []string{"namespace", "cr_kind", "status"})
+
+	crPatchErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: MetricsNamespace,
+		Name:      CrPatchErrorsTotalKey,
+		Help:      "counter by error type.",
+	}, []string{"namespace", "cr_kind", "error_type"})
+
 	ResizerSuccessResizeTotal *resizerSuccessResizeTotalAdapter = &resizerSuccessResizeTotalAdapter{
 		metric: *resizerSuccessResizeTotal,
 	}
@@ -104,6 +134,12 @@ var (
 	ResizerLimitReachedTotal *resizerLimitReachedTotalAdapter = &resizerLimitReachedTotalAdapter{
 		metric: *resizerLimitReachedTotal,
 	}
+	CrPatchTotal *crPatchTotalAdapter = &crPatchTotalAdapter{
+		metric: *crPatchTotal,
+	}
+	CrPatchErrorsTotal *crPatchErrorsTotalAdapter = &crPatchErrorsTotalAdapter{
+		metric: *crPatchErrorsTotal,
+	}
 )
 
 func registerResizerMetrics() {
@@ -111,4 +147,6 @@ func registerResizerMetrics() {
 	runtimemetrics.Registry.MustRegister(resizerFailedResizeTotal)
 	runtimemetrics.Registry.MustRegister(resizerLoopSecondsTotal)
 	runtimemetrics.Registry.MustRegister(resizerLimitReachedTotal)
+	runtimemetrics.Registry.MustRegister(crPatchTotal)
+	runtimemetrics.Registry.MustRegister(crPatchErrorsTotal)
 }
