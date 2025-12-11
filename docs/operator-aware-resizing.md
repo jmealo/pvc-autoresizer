@@ -138,7 +138,211 @@ The `target-resource-json-path` annotation accepts two formats:
 
 Both formats are automatically normalized internally to JSON Pointer format.
 
-## Examples
+## How to Add Annotations
+
+### Using kubectl
+
+The easiest way to add operator-aware resizing annotations is using `kubectl annotate`:
+
+#### CloudNativePG
+
+```bash
+kubectl annotate pvc my-postgres-1 -n database \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="500Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="10Gi" \
+  resize.topolvm.io/target-resource-api-version="postgresql.cnpg.io/v1" \
+  resize.topolvm.io/target-resource-kind="Cluster" \
+  resize.topolvm.io/target-resource-name="my-postgres" \
+  resize.topolvm.io/target-resource-json-path=".spec.storage.size"
+```
+
+#### RabbitMQ Operator
+
+```bash
+kubectl annotate pvc persistence-my-rabbitmq-server-0 -n messaging \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="100Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="10Gi" \
+  resize.topolvm.io/target-resource-api-version="rabbitmq.com/v1beta1" \
+  resize.topolvm.io/target-resource-kind="RabbitmqCluster" \
+  resize.topolvm.io/target-resource-name="my-rabbitmq" \
+  resize.topolvm.io/target-resource-json-path=".spec.persistence.storage"
+```
+
+#### Strimzi Kafka Operator
+
+```bash
+kubectl annotate pvc data-my-kafka-cluster-kafka-0 -n kafka \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="1000Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="50Gi" \
+  resize.topolvm.io/target-resource-api-version="kafka.strimzi.io/v1beta2" \
+  resize.topolvm.io/target-resource-kind="Kafka" \
+  resize.topolvm.io/target-resource-name="my-kafka-cluster" \
+  resize.topolvm.io/target-resource-json-path=".spec.kafka.storage.size"
+```
+
+**Tips:**
+- Use `--overwrite` flag if annotations already exist: `kubectl annotate pvc ... --overwrite`
+- If the CR is in a different namespace, add: `resize.topolvm.io/target-resource-namespace="other-namespace"`
+- Verify annotations: `kubectl get pvc <name> -n <namespace> -o yaml | grep resize.topolvm.io`
+
+### Adding Annotations to Operator CRs (When Supported)
+
+Some operators allow you to add PVC annotations directly in the CR spec. The operator will automatically apply these annotations to the PVCs it creates.
+
+**Note**: CloudNativePG does not currently support adding annotations via `pvcTemplate.metadata`. For CNPG clusters, you must annotate PVCs after creation using `kubectl annotate`.
+
+#### RabbitMQ Cluster
+
+```yaml
+apiVersion: rabbitmq.com/v1beta1
+kind: RabbitmqCluster
+metadata:
+  name: my-rabbitmq
+  namespace: messaging
+spec:
+  replicas: 3
+  persistence:
+    storage: 10Gi
+    storageClassName: topolvm-provisioner
+  override:
+    statefulSet:
+      spec:
+        volumeClaimTemplates:
+          - metadata:
+              name: persistence
+              annotations:
+                resize.topolvm.io/enabled: "true"
+                resize.topolvm.io/storage_limit: "100Gi"
+                resize.topolvm.io/threshold: "20%"
+                resize.topolvm.io/increase: "10Gi"
+                resize.topolvm.io/target-resource-api-version: "rabbitmq.com/v1beta1"
+                resize.topolvm.io/target-resource-kind: "RabbitmqCluster"
+                resize.topolvm.io/target-resource-name: "my-rabbitmq"
+                resize.topolvm.io/target-resource-json-path: ".spec.persistence.storage"
+```
+
+#### Strimzi Kafka Cluster
+
+```yaml
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: my-kafka-cluster
+  namespace: kafka
+spec:
+  kafka:
+    version: 3.6.0
+    replicas: 3
+    storage:
+      type: persistent-claim
+      size: 100Gi
+      class: topolvm-provisioner
+      overrides:
+        - broker: 0
+          metadata:
+            annotations:
+              resize.topolvm.io/enabled: "true"
+              resize.topolvm.io/storage_limit: "1000Gi"
+              resize.topolvm.io/threshold: "20%"
+              resize.topolvm.io/increase: "50Gi"
+              resize.topolvm.io/target-resource-api-version: "kafka.strimzi.io/v1beta2"
+              resize.topolvm.io/target-resource-kind: "Kafka"
+              resize.topolvm.io/target-resource-name: "my-kafka-cluster"
+              resize.topolvm.io/target-resource-json-path: ".spec.kafka.storage.size"
+        # Repeat for other brokers if needed
+  zookeeper:
+    replicas: 3
+    storage:
+      type: persistent-claim
+      size: 10Gi
+      class: topolvm-provisioner
+```
+
+**Note**: For Strimzi, you may need to add annotations to each broker's PVC template individually, or use a template override that applies to all brokers.
+
+### CloudNativePG with Separate WAL Volumes
+
+When using separate WAL volumes, each PVC type requires a different JSON path:
+
+```bash
+# Data PVC (PG_DATA)
+kubectl annotate pvc my-postgres-1 -n database \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="500Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="10Gi" \
+  resize.topolvm.io/target-resource-api-version="postgresql.cnpg.io/v1" \
+  resize.topolvm.io/target-resource-kind="Cluster" \
+  resize.topolvm.io/target-resource-name="my-postgres" \
+  resize.topolvm.io/target-resource-json-path=".spec.storage.size"
+
+# WAL PVC (PG_WAL)
+kubectl annotate pvc my-postgres-1-wal -n database \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="200Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="10Gi" \
+  resize.topolvm.io/target-resource-api-version="postgresql.cnpg.io/v1" \
+  resize.topolvm.io/target-resource-kind="Cluster" \
+  resize.topolvm.io/target-resource-name="my-postgres" \
+  resize.topolvm.io/target-resource-json-path=".spec.walStorage.size"
+
+# Tablespace PVC (if using tablespaces)
+kubectl annotate pvc my-postgres-1-mydata -n database \
+  resize.topolvm.io/enabled="true" \
+  resize.topolvm.io/storage_limit="1000Gi" \
+  resize.topolvm.io/threshold="20%" \
+  resize.topolvm.io/increase="50Gi" \
+  resize.topolvm.io/target-resource-api-version="postgresql.cnpg.io/v1" \
+  resize.topolvm.io/target-resource-kind="Cluster" \
+  resize.topolvm.io/target-resource-name="my-postgres" \
+  resize.topolvm.io/target-resource-json-path=".spec.tablespaces[?(@.name=='mydata')].storage.size"
+```
+
+**Tip**: CloudNativePG labels PVCs with `cnpg.io/pvcRole` to indicate the volume type:
+- `PG_DATA` - Main data volume
+- `PG_WAL` - Write-Ahead Log volume
+- `PG_TABLESPACE` - Tablespace volume
+
+### Automating Annotations with Kyverno
+
+For CloudNativePG clusters, you can use Kyverno to automatically add the correct annotations to all PVCs. See the complete example policy at:
+
+`examples/kyverno-cnpg-autoresizer.yaml`
+
+The policy automatically:
+- Detects PVC type using the `cnpg.io/pvcRole` label
+- Applies the correct JSON path for each volume type
+- Extracts the cluster name from `cnpg.io/cluster` label
+- Supports data, WAL, and tablespace volumes
+
+Reference: [CloudNativePG Discussion #2321](https://github.com/cloudnative-pg/cloudnative-pg/discussions/2321)
+
+### Finding the Correct PVC Name
+
+If you need to annotate existing PVCs manually, different operators use different naming patterns:
+
+```bash
+# CloudNativePG: <cluster-name>-<pod-number>
+kubectl get pvc -n database -l cnpg.io/cluster=my-postgres
+
+# CloudNativePG WAL volumes: <cluster-name>-<pod-number>-wal
+kubectl get pvc -n database -l cnpg.io/cluster=my-postgres,cnpg.io/pvcRole=PG_WAL
+
+# RabbitMQ: persistence-<cluster-name>-server-<number>
+kubectl get pvc -n messaging -l app.kubernetes.io/name=my-rabbitmq
+
+# Strimzi Kafka: data-<cluster-name>-kafka-<broker-id>
+kubectl get pvc -n kafka -l strimzi.io/cluster=my-kafka-cluster
+```
+
+## YAML Examples
 
 ### RabbitMQ Operator
 
@@ -192,30 +396,32 @@ spec:
   storageClassName: topolvm-provisioner
 ```
 
-### DragonflyDB Operator
+### Strimzi Kafka Operator
 
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: dragonfly-data-0
-  namespace: dragonfly
+  name: data-kafka-cluster-kafka-0
+  namespace: kafka
   annotations:
-    resize.topolvm.io/storage_limit: "200Gi"
-    resize.topolvm.io/threshold: "25%"
-    resize.topolvm.io/increase: "15Gi"
+    resize.topolvm.io/storage_limit: "1000Gi"
+    resize.topolvm.io/threshold: "20%"
+    resize.topolvm.io/increase: "50Gi"
 
-    resize.topolvm.io/target-resource-api-version: "dragonflydb.io/v1alpha1"
-    resize.topolvm.io/target-resource-kind: "Dragonfly"
-    resize.topolvm.io/target-resource-name: "my-dragonfly"
-    resize.topolvm.io/target-resource-json-path: ".spec.resources.requests.storage"
+    resize.topolvm.io/target-resource-api-version: "kafka.strimzi.io/v1beta2"
+    resize.topolvm.io/target-resource-kind: "Kafka"
+    resize.topolvm.io/target-resource-name: "my-kafka-cluster"
+    resize.topolvm.io/target-resource-json-path: ".spec.kafka.storage.size"
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
-      storage: 25Gi
+      storage: 100Gi
   storageClassName: topolvm-provisioner
 ```
+
+**Note**: This example is for Kafka broker storage. Adjust the JSON path for ZooKeeper storage if needed (`.spec.zookeeper.storage.size`).
 
 ### Cross-Namespace Example
 
@@ -266,10 +472,10 @@ operatorAwareResizing:
       kind: "Cluster"
       resource: "clusters"
 
-    # DragonflyDB
-    - apiGroup: "dragonflydb.io"
-      kind: "Dragonfly"
-      resource: "dragonflies"
+    # Strimzi Kafka
+    - apiGroup: "kafka.strimzi.io"
+      kind: "Kafka"
+      resource: "kafkas"
 ```
 
 **Step 2: Deploy or upgrade**
@@ -308,9 +514,9 @@ rules:
   resources: ["clusters"]
   verbs: ["get", "list", "patch"]
 
-# DragonflyDB
-- apiGroups: ["dragonflydb.io"]
-  resources: ["dragonflies"]
+# Strimzi Kafka
+- apiGroups: ["kafka.strimzi.io"]
+  resources: ["kafkas"]
   verbs: ["get", "list", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -340,7 +546,7 @@ subjects:
 
 Two new Prometheus metrics are available for operator-aware resizing:
 
-#### `pvc_autoresizer_cr_patch_success_total`
+#### `pvcautoresizer_cr_patch_success_total`
 
 Counter for successful CR patch operations.
 
@@ -352,7 +558,7 @@ Counter for successful CR patch operations.
 
 **Example:**
 ```
-pvc_autoresizer_cr_patch_success_total{
+pvcautoresizer_cr_patch_success_total{
   persistentvolumeclaim="data-rabbitmq-0",
   namespace="rabbitmq",
   target_kind="RabbitmqCluster",
@@ -360,7 +566,7 @@ pvc_autoresizer_cr_patch_success_total{
 } 5
 ```
 
-#### `pvc_autoresizer_cr_patch_failed_total`
+#### `pvcautoresizer_cr_patch_failed_total`
 
 Counter for failed CR patch operations.
 
@@ -368,7 +574,7 @@ Counter for failed CR patch operations.
 
 **Example:**
 ```
-pvc_autoresizer_cr_patch_failed_total{
+pvcautoresizer_cr_patch_failed_total{
   persistentvolumeclaim="data-rabbitmq-0",
   namespace="rabbitmq",
   target_kind="RabbitmqCluster",
@@ -604,7 +810,7 @@ To migrate existing PVCs from direct patching to operator-aware resizing:
 
 1. **Test in Non-Production First**: Verify the operator reconciles correctly with CR patches before production use
 
-2. **Monitor Metrics**: Set up alerts on `pvc_autoresizer_cr_patch_failed_total` to catch configuration issues early
+2. **Monitor Metrics**: Set up alerts on `pvcautoresizer_cr_patch_failed_total` to catch configuration issues early
 
 3. **Use Helm for RBAC**: Let Helm auto-generate RBAC from values.yaml to prevent configuration drift
 
@@ -620,15 +826,31 @@ To migrate existing PVCs from direct patching to operator-aware resizing:
 
 ## Supported Operators
 
-This feature has been tested with:
-- RabbitMQ Operator (rabbitmq.com/v1beta1)
-- CloudNativePG (postgresql.cnpg.io/v1)
-- Strimzi Kafka Operator (kafka.strimzi.io/v1beta2)
+This feature has been tested and verified with:
 
-It should work with any operator that:
+- **CloudNativePG (postgresql.cnpg.io/v1)** ✅
+  - Data volumes: `.spec.storage.size`
+  - WAL volumes: `.spec.walStorage.size`
+  - Tablespaces: `.spec.tablespaces[?(@.name=='<name>')].storage.size`
+  - Behavior: Operator immediately reconciles CR changes to PVC
+  - Status: Fully working (tested with data, WAL, and tablespace volumes)
+  - Automation: See `examples/kyverno-cnpg-autoresizer.yaml` for automatic annotation with Kyverno
+
+- **RabbitMQ Operator (rabbitmq.com/v1beta1)** ✅
+  - JSON Path: `.spec.persistence.storage`
+  - Behavior: Operator immediately reconciles CR changes to PVC
+  - Status: Fully working
+
+Testing pending for:
+- **Strimzi Kafka Operator (kafka.strimzi.io/v1beta2)**
+  - Expected paths: `.spec.kafka.storage.size`, `.spec.zookeeper.storage.size`
+
+This feature should work with any operator that:
 - Uses a CR to define storage size
 - Reconciles PVC specs based on CR changes
 - Accepts Kubernetes Quantity format for storage fields
+
+**Note**: DragonflyDB Operator is not included as it only uses PVCs for snapshot storage, not main data storage.
 
 ## Additional Resources
 
